@@ -70,8 +70,7 @@ added for frontend consumers that want a uniform single-family output for
 easier client-side post-processing (e.g. coefficient-based explanations, linear
 score decomposition). Screening trades roughly **0.020 PR-AUC at N=1 and N=3**
 against the mixed-family default and is within ~0.001 at N=2/4/5 (where the
-default already uses Logistic). See `digihealth_risk/phase_8/README.md` for
-the screening validation.
+default already uses Logistic).
 
 Intervention is also exposed under `/logistic_only/*` via
 **monotonic-constrained logistic regression**: coefficient sign bounds enforced
