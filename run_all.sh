@@ -334,16 +334,16 @@ if [[ "$FROM_PHASE" -le 6 ]] && ! $NO_DEPLOY; then
     _phase_header 6 "Deployment — export 15 monotonic XGBoost models"
 
     _run "phase_6  export_models (15 models)" \
-        python digihealth_risk/phase_6_deployment/export_models.py
+        python digihealth_risk/phase_6/export_models.py
 
     _log ""
     _log "  To start the API after export:"
-    _log "    uvicorn digihealth_risk.phase_6_deployment.api:app --reload --port 8000"
+    _log "    uvicorn digihealth_risk.phase_6.api:app --reload --port 8000"
     _log "  Interactive docs: http://localhost:8000/docs"
 elif $NO_DEPLOY; then
     _log ""
     _log "  Phase 6 deployment skipped (--no-deploy)."
-    _log "  Run manually: python digihealth_risk/phase_6_deployment/export_models.py"
+    _log "  Run manually: python digihealth_risk/phase_6/export_models.py"
 fi
 
 # ═══════════════════════════════════════════════════════════
@@ -371,7 +371,7 @@ if [[ "$FROM_PHASE" -le 7 ]] && ! $NO_ABLATION; then
     # also off; otherwise it's part of the ablation phase.
     if ! $NO_DEPLOY; then
         _run "phase_7  export_models --no-year (dual-track API artifacts)" \
-            python digihealth_risk/phase_6_deployment/export_models.py --no-year
+            python digihealth_risk/phase_6/export_models.py --no-year
 
         _log ""
         _log "  After both phase 6 + phase 7 export, the API serves both trees:"
@@ -380,7 +380,7 @@ if [[ "$FROM_PHASE" -le 7 ]] && ! $NO_ABLATION; then
     else
         _log ""
         _log "  No-Year deployment export skipped (--no-deploy)."
-        _log "  Run manually: python digihealth_risk/phase_6_deployment/export_models.py --no-year"
+        _log "  Run manually: python digihealth_risk/phase_6/export_models.py --no-year"
     fi
 elif $NO_ABLATION; then
     _log ""

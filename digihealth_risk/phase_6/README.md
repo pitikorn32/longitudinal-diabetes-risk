@@ -65,7 +65,7 @@ the surface area of the old deployment.
 
 ### Step 1 — Export all 30 models
 ```bash
-python digihealth_risk/phase_6_deployment/export_models.py
+python digihealth_risk/phase_6/export_models.py
 ```
 Writes:
 - `outputs/models/{track}_{family}_n{N}_m{M}.joblib` — 30 artifacts
@@ -76,7 +76,7 @@ Writes:
 
 ### Step 1b (optional) — Export the no-Year variant
 ```bash
-python digihealth_risk/phase_6_deployment/export_models.py --no-year
+python digihealth_risk/phase_6/export_models.py --no-year
 ```
 Writes (parallel filenames so both variants coexist):
 - `outputs/models_no_year/{track}_{family}_n{N}_m{M}.joblib`
@@ -89,11 +89,11 @@ regardless.
 
 ### Step 2 — Start the API server
 ```bash
-uvicorn digihealth_risk.phase_6_deployment.api:app --reload --port 8000
+uvicorn digihealth_risk.phase_6.api:app --reload --port 8000
 ```
 Or directly:
 ```bash
-python digihealth_risk/phase_6_deployment/api.py
+python digihealth_risk/phase_6/api.py
 ```
 Interactive docs: http://localhost:8000/docs
 

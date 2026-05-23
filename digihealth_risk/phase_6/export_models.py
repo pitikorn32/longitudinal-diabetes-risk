@@ -31,15 +31,15 @@ Per-horizon model selection:
 History windows: M ∈ {1, 3, 5}, matching the old phase_7 deployment surface.
 
 Run from the repository root:
-    python digihealth_risk/phase_6_deployment/export_models.py
+    python digihealth_risk/phase_6/export_models.py
 
-Outputs (`digihealth_risk/phase_6_deployment/outputs/`):
+Outputs (`digihealth_risk/phase_6/outputs/`):
     models/{track}_{family}_n{N}_m{M}.joblib   30 model artifacts
     model_registry.json                         per-model metadata for the API
     deployment_metrics.csv                      train/test metrics for all 30
 
 Optional no-Year variant (--no-year flag):
-    python digihealth_risk/phase_6_deployment/export_models.py --no-year
+    python digihealth_risk/phase_6/export_models.py --no-year
 
 Trains the same 30 configurations with `Year`, `Year_centered`, and
 `Year_centered_sq` excluded (the phase_7 ablation). Outputs to
@@ -85,7 +85,7 @@ from digihealth_risk.phase_5.train_monotonic_xgboost import (  # noqa: E402
 
 
 PHASE0_OUT = ROOT / "digihealth_risk" / "phase_0" / "outputs"
-OUT_DIR = ROOT / "digihealth_risk" / "phase_6_deployment" / "outputs"
+OUT_DIR = ROOT / "digihealth_risk" / "phase_6" / "outputs"
 
 
 def output_paths(no_year: bool) -> tuple[Path, Path, Path]:

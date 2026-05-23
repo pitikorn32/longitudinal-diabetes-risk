@@ -100,7 +100,7 @@ thesis needs to weigh that against the construct-validity argument in §6.
 
 Phase 7 deliberately does **not** re-export phase 6 deployment artifacts.
 This is a metrics-only ablation. If the deltas support dropping Year features
-from production, modify `digihealth_risk/phase_6_deployment/api.py` and
+from production, modify `digihealth_risk/phase_6/api.py` and
 `export_models.py` to omit `Year_centered` and `Year_centered_sq` from the
 inference feature set, and re-run `export_models.py` against either the
 existing phase 5 outputs (kept) or the phase 7 outputs (re-trained).

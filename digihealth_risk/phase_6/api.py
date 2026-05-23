@@ -28,10 +28,10 @@ become invariant to the calendar year a patient is scored in, at a small
 documented PR-AUC cost (phase_7 ablation report).
 
 Start the server:
-    uvicorn digihealth_risk.phase_6_deployment.api:app --reload --port 8000
+    uvicorn digihealth_risk.phase_6.api:app --reload --port 8000
 
 Or run directly:
-    python digihealth_risk/phase_6_deployment/api.py
+    python digihealth_risk/phase_6/api.py
 
 Endpoints:
     GET  /health
@@ -65,8 +65,8 @@ from scipy import special
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-MODEL_DIR = ROOT / "digihealth_risk" / "phase_6_deployment" / "outputs" / "models"
-MODEL_DIR_NO_YEAR = ROOT / "digihealth_risk" / "phase_6_deployment" / "outputs" / "models_no_year"
+MODEL_DIR = ROOT / "digihealth_risk" / "phase_6" / "outputs" / "models"
+MODEL_DIR_NO_YEAR = ROOT / "digihealth_risk" / "phase_6" / "outputs" / "models_no_year"
 
 CLINICAL_FEATURES = ["FBS", "BMI", "Pulse", "BL_pres1", "BL_pres2", "Waist"]
 YEAR_REFERENCE = 2005  # min(Year) in training data
@@ -115,7 +115,7 @@ def _load_all_models_no_year() -> None:
     if not MODEL_DIR_NO_YEAR.exists():
         print(
             f"INFO: no-Year model directory missing — {MODEL_DIR_NO_YEAR}. "
-            "Run `python digihealth_risk/phase_6_deployment/export_models.py --no-year` "
+            "Run `python digihealth_risk/phase_6/export_models.py --no-year` "
             "to enable /no_year/* endpoints."
         )
         return
@@ -581,9 +581,9 @@ def _get_artifact(track: str, horizon: int, history: int, variant: str = VARIANT
     artifact = store.get(key)
     if artifact is None:
         export_cmd = (
-            "python digihealth_risk/phase_6_deployment/export_models.py"
+            "python digihealth_risk/phase_6/export_models.py"
             if variant == VARIANT_WITH_YEAR
-            else "python digihealth_risk/phase_6_deployment/export_models.py --no-year"
+            else "python digihealth_risk/phase_6/export_models.py --no-year"
         )
         raise HTTPException(
             status_code=404,
@@ -908,4 +908,4 @@ def predict_interventions_no_year(req: InterventionRequest) -> InterventionRespo
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("digihealth_risk.phase_6_deployment.api:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("digihealth_risk.phase_6.api:app", host="0.0.0.0", port=8000, reload=False)

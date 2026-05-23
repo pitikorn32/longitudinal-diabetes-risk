@@ -45,7 +45,7 @@ All commands must be run from the **repository root** (`longitudinal-diabetes-ri
 | 5 | phase_4 | `cross_family_comparison.py` | **Final leaderboard** | §5.1 |
 | 6 | phase_5 | `train_monotonic_*.py` (×5) | Monotonic model artifacts | §4.3 |
 | 6 | phase_5 | `intervention_benchmark.py` | Intervention-safe leaderboard | §5.4 |
-| 7 | phase_6_deployment | `export_models.py` + `api.py` | REST API (15 models) | §7 |
+| 7 | phase_6 | `export_models.py` + `api.py` | REST API (15 models) | §7 |
 
 Phase 0a (appendix EDA) can be run any time after Phase 0 Step 1.
 Steps 2, 3, 4 can be run in any order — all depend only on Phase 0 outputs.
@@ -107,7 +107,7 @@ datasets/df_final.pkl
                       ├── phase_4_v2_test_predictions.csv ← phase_4 (threshold)
                       └── phase_4_2_v2_cross_family_ranking.csv ← phase_5
                             phase_5/outputs/
-                              └── models_v2/ ← phase_6_deployment
+                              └── models_v2/ ← phase_6
 ```
 
 ---
