@@ -228,6 +228,8 @@ logs/
 # Deployment model artifacts and registries.
 deployment/models/
 deployment/models_no_year/
+deployment/models_logistic_only/
+deployment/models_logistic_only_no_year/
 deployment/model_registry*.json
 deployment/deployment_metrics*.csv
 

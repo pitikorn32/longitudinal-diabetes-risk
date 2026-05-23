@@ -17,6 +17,11 @@ A parallel /no_year/* route tree exposes the year-ablation variant: identical
 model families and preprocessing, but with Year, Year_centered and
 Year_centered_sq excluded from training and inference.
 
+A /logistic_only/* route tree (with a nested /logistic_only/no_year/* tree)
+serves a uniform logistic-regression screening model at every horizon, for
+frontend consumers that want a single-family output for easier client-side
+post-processing. Intervention scoring is not exposed under /logistic_only/*.
+
 This is the standalone deployment slice. The model artifacts it serves are
 produced by export_models.py in this folder.
 
@@ -26,8 +31,11 @@ Start the server (from this folder):
 Or run directly:
     python api.py
 
-Model directories default to ./models and ./models_no_year; override with the
-DIGIHEALTH_MODEL_DIR and DIGIHEALTH_MODEL_DIR_NO_YEAR environment variables.
+Model directories default to ./models, ./models_no_year,
+./models_logistic_only, and ./models_logistic_only_no_year; override with
+the DIGIHEALTH_MODEL_DIR, DIGIHEALTH_MODEL_DIR_NO_YEAR,
+DIGIHEALTH_MODEL_DIR_LOGISTIC_ONLY, and
+DIGIHEALTH_MODEL_DIR_LOGISTIC_ONLY_NO_YEAR environment variables.
 
 Endpoints:
     GET  /health
@@ -40,6 +48,14 @@ Endpoints:
     GET  /no_year/models/{key}
     POST /no_year/predict
     POST /no_year/predict/interventions
+    GET  /logistic_only/health
+    GET  /logistic_only/models
+    GET  /logistic_only/models/{key}
+    POST /logistic_only/predict
+    GET  /logistic_only/no_year/health
+    GET  /logistic_only/no_year/models
+    GET  /logistic_only/no_year/models/{key}
+    POST /logistic_only/no_year/predict
 """
 
 from __future__ import annotations
@@ -71,6 +87,12 @@ from schemas import (
 HERE = Path(__file__).resolve().parent
 MODEL_DIR = Path(os.environ.get("DIGIHEALTH_MODEL_DIR", str(HERE / "models")))
 MODEL_DIR_NO_YEAR = Path(os.environ.get("DIGIHEALTH_MODEL_DIR_NO_YEAR", str(HERE / "models_no_year")))
+MODEL_DIR_LOGISTIC_ONLY = Path(os.environ.get(
+    "DIGIHEALTH_MODEL_DIR_LOGISTIC_ONLY", str(HERE / "models_logistic_only")
+))
+MODEL_DIR_LOGISTIC_ONLY_NO_YEAR = Path(os.environ.get(
+    "DIGIHEALTH_MODEL_DIR_LOGISTIC_ONLY_NO_YEAR", str(HERE / "models_logistic_only_no_year")
+))
 
 CLINICAL_FEATURES = ["FBS", "BMI", "Pulse", "BL_pres1", "BL_pres2", "Waist"]
 YEAR_REFERENCE = 2005  # min(Year) in training data
@@ -80,14 +102,21 @@ TRACK_INTERVENTION = "intervention"
 
 VARIANT_WITH_YEAR = "with_year"
 VARIANT_NO_YEAR = "no_year"
+VARIANT_LOGISTIC_ONLY_WITH_YEAR = "logistic_only_with_year"
+VARIANT_LOGISTIC_ONLY_NO_YEAR = "logistic_only_no_year"
 
 # Per-horizon model family per track. Must match export_models.py.
 SCREENING_FAMILY = {1: "catboost", 2: "logistic", 3: "xgboost", 4: "logistic", 5: "logistic"}
 INTERVENTION_FAMILY = {1: "ebm", 2: "catboost", 3: "xgboost", 4: "catboost", 5: "catboost"}
 
+# Logistic-only screening track: logistic at every horizon. Frontend-driven.
+LOGISTIC_ONLY_SCREENING_FAMILY = {n: "logistic" for n in (1, 2, 3, 4, 5)}
+
 # Loaded at startup. Keyed by model_key (e.g. "screening_catboost_n1_m5").
 _models: dict[str, dict[str, Any]] = {}
 _models_no_year: dict[str, dict[str, Any]] = {}
+_models_logistic_only: dict[str, dict[str, Any]] = {}
+_models_logistic_only_no_year: dict[str, dict[str, Any]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -133,10 +162,58 @@ def _load_all_models_no_year() -> None:
     print(f"Loaded {len(_models_no_year)}/{expected} no-Year models.")
 
 
+def _expected_keys_logistic_only() -> list[str]:
+    """Screening-only key set: logistic at every horizon, all history windows."""
+    keys: list[str] = []
+    for history in (1, 3, 5):
+        for horizon in (1, 2, 3, 4, 5):
+            keys.append(f"{TRACK_SCREENING}_logistic_n{horizon}_m{history}")
+    return keys
+
+
+def _load_all_models_logistic_only() -> None:
+    if not MODEL_DIR_LOGISTIC_ONLY.exists():
+        print(
+            f"INFO: logistic-only model directory missing — {MODEL_DIR_LOGISTIC_ONLY}. "
+            "Run `python export_models.py --logistic-only` "
+            "to enable /logistic_only/* endpoints."
+        )
+        return
+    for key in _expected_keys_logistic_only():
+        path = MODEL_DIR_LOGISTIC_ONLY / f"{key}.joblib"
+        if path.exists():
+            _models_logistic_only[key] = joblib.load(path)
+        else:
+            print(f"WARNING: logistic-only model not found — {path}")
+    expected = len(_expected_keys_logistic_only())
+    print(f"Loaded {len(_models_logistic_only)}/{expected} logistic-only models.")
+
+
+def _load_all_models_logistic_only_no_year() -> None:
+    if not MODEL_DIR_LOGISTIC_ONLY_NO_YEAR.exists():
+        print(
+            f"INFO: logistic-only no-Year model directory missing — "
+            f"{MODEL_DIR_LOGISTIC_ONLY_NO_YEAR}. "
+            "Run `python export_models.py --logistic-only --no-year` "
+            "to enable /logistic_only/no_year/* endpoints."
+        )
+        return
+    for key in _expected_keys_logistic_only():
+        path = MODEL_DIR_LOGISTIC_ONLY_NO_YEAR / f"{key}.joblib"
+        if path.exists():
+            _models_logistic_only_no_year[key] = joblib.load(path)
+        else:
+            print(f"WARNING: logistic-only no-Year model not found — {path}")
+    expected = len(_expected_keys_logistic_only())
+    print(f"Loaded {len(_models_logistic_only_no_year)}/{expected} logistic-only no-Year models.")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _load_all_models()
     _load_all_models_no_year()
+    _load_all_models_logistic_only()
+    _load_all_models_logistic_only_no_year()
     yield
 
 
@@ -145,8 +222,11 @@ app = FastAPI(
     description=(
         "Thesis-aligned diabetes risk scoring with two complementary tracks: "
         "passive screening (`/predict`) and intervention-safe what-if "
-        "simulation (`/predict/interventions`). Send raw questionnaire + "
-        "annual measurements — no patient ID needed."
+        "simulation (`/predict/interventions`). A `/logistic_only/predict` "
+        "route (with a nested `/logistic_only/no_year/predict` variant) serves "
+        "a uniform logistic-regression screening output for frontend consumers "
+        "that need a single-family model. Send raw questionnaire + annual "
+        "measurements — no patient ID needed."
     ),
     version="2.0.0",
     lifespan=lifespan,
@@ -385,20 +465,38 @@ def _track_family(track: str, horizon: int) -> str:
     return family_map[horizon]
 
 
+_VARIANT_STORES: dict[str, dict[str, dict[str, Any]]] = {
+    VARIANT_WITH_YEAR: _models,
+    VARIANT_NO_YEAR: _models_no_year,
+    VARIANT_LOGISTIC_ONLY_WITH_YEAR: _models_logistic_only,
+    VARIANT_LOGISTIC_ONLY_NO_YEAR: _models_logistic_only_no_year,
+}
+
+_VARIANT_EXPORT_CMD: dict[str, str] = {
+    VARIANT_WITH_YEAR: "python export_models.py",
+    VARIANT_NO_YEAR: "python export_models.py --no-year",
+    VARIANT_LOGISTIC_ONLY_WITH_YEAR: "python export_models.py --logistic-only",
+    VARIANT_LOGISTIC_ONLY_NO_YEAR: "python export_models.py --logistic-only --no-year",
+}
+
+
 def _get_artifact(track: str, horizon: int, history: int, variant: str = VARIANT_WITH_YEAR) -> dict[str, Any]:
-    family = _track_family(track, horizon)
+    if variant in (VARIANT_LOGISTIC_ONLY_WITH_YEAR, VARIANT_LOGISTIC_ONLY_NO_YEAR):
+        # Logistic-only variants serve only the screening track; family is
+        # logistic regardless of horizon.
+        family = "logistic"
+    else:
+        family = _track_family(track, horizon)
     key = f"{track}_{family}_n{horizon}_m{history}"
-    store = _models if variant == VARIANT_WITH_YEAR else _models_no_year
+    store = _VARIANT_STORES[variant]
     artifact = store.get(key)
     if artifact is None:
-        export_cmd = (
-            "python export_models.py"
-            if variant == VARIANT_WITH_YEAR
-            else "python export_models.py --no-year"
-        )
         raise HTTPException(
             status_code=404,
-            detail=f"Model '{key}' ({variant}) not loaded. Run `{export_cmd}` first.",
+            detail=(
+                f"Model '{key}' ({variant}) not loaded. "
+                f"Run `{_VARIANT_EXPORT_CMD[variant]}` first."
+            ),
         )
     return artifact
 
@@ -710,6 +808,194 @@ def predict_interventions_no_year(req: InterventionRequest) -> InterventionRespo
             at_risk_flag=bool(baseline_prob >= threshold),
         ),
         scenarios=scenarios,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Routes — /logistic_only/* (uniform logistic screening track)
+#
+# Frontend-driven uniform-family screening: logistic regression at every
+# horizon, so the response always has model_family == "logistic". Trades
+# ~0.020 PR-AUC at N=1 and N=3 against the mixed-family default in exchange
+# for an output that is easier to post-process client-side. No intervention
+# endpoint here — intervention scoring stays on /predict/interventions.
+# Run `python export_models.py --logistic-only` to populate the joblibs.
+# ---------------------------------------------------------------------------
+
+@app.get("/logistic_only/health")
+def health_logistic_only() -> dict[str, Any]:
+    expected = len(_expected_keys_logistic_only())
+    return {
+        "status": "ok" if _models_logistic_only else "models_not_loaded",
+        "variant": VARIANT_LOGISTIC_ONLY_WITH_YEAR,
+        "models_loaded": len(_models_logistic_only),
+        "expected": expected,
+        "tracks": {
+            "screening": {"family_per_horizon": LOGISTIC_ONLY_SCREENING_FAMILY},
+        },
+        "rationale": (
+            "Logistic-only screening alternative to /predict. Returns a uniform "
+            "logistic model at every horizon for frontend post-processing. "
+            "Intervention scoring is not exposed on this tree; use "
+            "/predict/interventions for what-if simulation."
+        ),
+    }
+
+
+@app.get("/logistic_only/models", response_model=list[ModelInfo])
+def list_models_logistic_only() -> list[ModelInfo]:
+    return [
+        ModelInfo(
+            key=a["model_key"],
+            track=a["track"],
+            model_family=a["model_family"],
+            horizon_years=a["horizon_years"],
+            history_years=a["history_years"],
+            threshold=round(a["threshold"], 6),
+            feature_count=len(a["feature_columns"]),
+            intervention_presets=list(a.get("intervention_presets", {}).keys()),
+        )
+        for a in sorted(
+            _models_logistic_only.values(),
+            key=lambda x: (x["track"], x["history_years"], x["horizon_years"]),
+        )
+    ]
+
+
+@app.get("/logistic_only/models/{key}", response_model=ModelInfo)
+def get_model_logistic_only(
+    key: Annotated[str, PathParam(description="e.g. screening_logistic_n3_m5")]
+) -> ModelInfo:
+    artifact = _models_logistic_only.get(key)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail=f"Model '{key}' (logistic_only) not found.")
+    return ModelInfo(
+        key=artifact["model_key"],
+        track=artifact["track"],
+        model_family=artifact["model_family"],
+        horizon_years=artifact["horizon_years"],
+        history_years=artifact["history_years"],
+        threshold=round(artifact["threshold"], 6),
+        feature_count=len(artifact["feature_columns"]),
+        intervention_presets=list(artifact.get("intervention_presets", {}).keys()),
+    )
+
+
+@app.post("/logistic_only/predict", response_model=PredictResponse)
+def predict_logistic_only(req: PredictRequest) -> PredictResponse:
+    """Logistic-only screening — uniform logistic family at every horizon."""
+    artifact = _get_artifact(
+        TRACK_SCREENING, req.horizon_years, req.history_years,
+        variant=VARIANT_LOGISTIC_ONLY_WITH_YEAR,
+    )
+
+    row = build_modeling_row(req)
+    row = _engineer_features(row)
+
+    prob = _score(artifact, row)
+    score = _risk_score(prob)
+    threshold = artifact["threshold"]
+
+    return PredictResponse(
+        model_key=artifact["model_key"],
+        track=artifact["track"],
+        model_family=artifact["model_family"],
+        horizon_years=req.horizon_years,
+        history_years=req.history_years,
+        probability=round(prob, 6),
+        risk_score=score,
+        threshold=round(threshold, 6),
+        at_risk_flag=bool(prob >= threshold),
+    )
+
+
+@app.get("/logistic_only/no_year/health")
+def health_logistic_only_no_year() -> dict[str, Any]:
+    expected = len(_expected_keys_logistic_only())
+    return {
+        "status": "ok" if _models_logistic_only_no_year else "models_not_loaded",
+        "variant": VARIANT_LOGISTIC_ONLY_NO_YEAR,
+        "year_features_excluded": ["Year", "Year_centered", "Year_centered_sq"],
+        "models_loaded": len(_models_logistic_only_no_year),
+        "expected": expected,
+        "tracks": {
+            "screening": {"family_per_horizon": LOGISTIC_ONLY_SCREENING_FAMILY},
+        },
+        "rationale": (
+            "Construct-validity variant of /logistic_only/predict. Combines the "
+            "uniform-logistic screening output with the calendar-time-invariant "
+            "year-ablation training. Use when both the frontend post-processing "
+            "constraint and the no-Year construct-validity guarantee are needed."
+        ),
+    }
+
+
+@app.get("/logistic_only/no_year/models", response_model=list[ModelInfo])
+def list_models_logistic_only_no_year() -> list[ModelInfo]:
+    return [
+        ModelInfo(
+            key=a["model_key"],
+            track=a["track"],
+            model_family=a["model_family"],
+            horizon_years=a["horizon_years"],
+            history_years=a["history_years"],
+            threshold=round(a["threshold"], 6),
+            feature_count=len(a["feature_columns"]),
+            intervention_presets=list(a.get("intervention_presets", {}).keys()),
+        )
+        for a in sorted(
+            _models_logistic_only_no_year.values(),
+            key=lambda x: (x["track"], x["history_years"], x["horizon_years"]),
+        )
+    ]
+
+
+@app.get("/logistic_only/no_year/models/{key}", response_model=ModelInfo)
+def get_model_logistic_only_no_year(
+    key: Annotated[str, PathParam(description="e.g. screening_logistic_n3_m5")]
+) -> ModelInfo:
+    artifact = _models_logistic_only_no_year.get(key)
+    if artifact is None:
+        raise HTTPException(
+            status_code=404, detail=f"Model '{key}' (logistic_only_no_year) not found."
+        )
+    return ModelInfo(
+        key=artifact["model_key"],
+        track=artifact["track"],
+        model_family=artifact["model_family"],
+        horizon_years=artifact["horizon_years"],
+        history_years=artifact["history_years"],
+        threshold=round(artifact["threshold"], 6),
+        feature_count=len(artifact["feature_columns"]),
+        intervention_presets=list(artifact.get("intervention_presets", {}).keys()),
+    )
+
+
+@app.post("/logistic_only/no_year/predict", response_model=PredictResponse)
+def predict_logistic_only_no_year(req: PredictRequest) -> PredictResponse:
+    """Logistic-only screening, Year features excluded (construct-validity variant)."""
+    artifact = _get_artifact(
+        TRACK_SCREENING, req.horizon_years, req.history_years,
+        variant=VARIANT_LOGISTIC_ONLY_NO_YEAR,
+    )
+
+    row = build_modeling_row(req)
+    row = _engineer_features_no_year(row)
+
+    prob = _score(artifact, row)
+    score = _risk_score(prob)
+    threshold = artifact["threshold"]
+
+    return PredictResponse(
+        model_key=artifact["model_key"],
+        track=artifact["track"],
+        model_family=artifact["model_family"],
+        horizon_years=req.horizon_years,
+        history_years=req.history_years,
+        probability=round(prob, 6),
+        risk_score=score,
+        threshold=round(threshold, 6),
+        at_risk_flag=bool(prob >= threshold),
     )
 
 

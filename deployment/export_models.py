@@ -39,6 +39,16 @@ Optional no-Year variant:
 Trains the same 30 configurations with Year, Year_centered and Year_centered_sq
 excluded. Outputs to models_no_year/, model_registry_no_year.json,
 deployment_metrics_no_year.csv. Powers the API's /no_year/* route tree.
+
+Optional logistic-only screening variant:
+    python export_models.py --logistic-only
+    python export_models.py --logistic-only --no-year
+
+Trains 15 screening-track artifacts using logistic regression at every
+horizon (intervention track is skipped). Outputs to models_logistic_only/
+or models_logistic_only_no_year/. Powers the API's /logistic_only/predict
+and /logistic_only/no_year/predict routes. Frontend-driven: a uniform
+single-family screening output for easier client-side post-processing.
 """
 
 from __future__ import annotations
@@ -82,8 +92,20 @@ PHASE0_OUT = Path(os.environ.get(
 OUT_DIR = HERE
 
 
-def output_paths(no_year: bool) -> tuple[Path, Path, Path]:
+def output_paths(no_year: bool, logistic_only: bool = False) -> tuple[Path, Path, Path]:
     """Return (model_dir, registry_path, metrics_path) for the chosen variant."""
+    if logistic_only and no_year:
+        return (
+            OUT_DIR / "models_logistic_only_no_year",
+            OUT_DIR / "model_registry_logistic_only_no_year.json",
+            OUT_DIR / "deployment_metrics_logistic_only_no_year.csv",
+        )
+    if logistic_only:
+        return (
+            OUT_DIR / "models_logistic_only",
+            OUT_DIR / "model_registry_logistic_only.json",
+            OUT_DIR / "deployment_metrics_logistic_only.csv",
+        )
     if no_year:
         return (
             OUT_DIR / "models_no_year",
@@ -495,18 +517,38 @@ def parse_args() -> argparse.Namespace:
             "API's /no_year/* route tree. Default trains with Year features."
         ),
     )
+    parser.add_argument(
+        "--logistic-only",
+        action="store_true",
+        help=(
+            "Train only the screening track using logistic regression at every "
+            "horizon (intervention track is skipped). Outputs 15 artifacts to "
+            "models_logistic_only/ (or models_logistic_only_no_year/ when "
+            "combined with --no-year). Powers the API's /logistic_only/* "
+            "route tree. Frontend-driven uniform-family alternative."
+        ),
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    global MODEL_DIR  # type: ignore[misc]
-    model_dir, registry_path, metrics_path = output_paths(args.no_year)
+    global MODEL_DIR, SCREENING_FAMILY  # type: ignore[misc]
+    model_dir, registry_path, metrics_path = output_paths(args.no_year, args.logistic_only)
     MODEL_DIR = model_dir
 
     if args.no_year:
         modeling.patch_drop_year_features()
         print("[export_models] no-Year mode: Year, Year_centered, Year_centered_sq excluded.")
+
+    tracks_to_train: tuple[str, ...] = (TRACK_SCREENING, TRACK_INTERVENTION)
+    if args.logistic_only:
+        SCREENING_FAMILY = {n: "logistic" for n in HORIZONS}
+        tracks_to_train = (TRACK_SCREENING,)
+        print(
+            "[export_models] logistic-only mode: screening track uses logistic at every "
+            "horizon; intervention track skipped."
+        )
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -514,7 +556,7 @@ def main() -> None:
     all_metrics: list[pd.DataFrame] = []
     registry_entries: list[dict] = []
 
-    for track in (TRACK_SCREENING, TRACK_INTERVENTION):
+    for track in tracks_to_train:
         family_map = SCREENING_FAMILY if track == TRACK_SCREENING else INTERVENTION_FAMILY
         for history in HISTORY_WINDOWS:
             for horizon in HORIZONS:
@@ -530,13 +572,29 @@ def main() -> None:
 
     pd.concat(all_metrics, ignore_index=True).to_csv(metrics_path, index=False)
 
-    registry = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "variant": "no_year" if args.no_year else "with_year",
-        "year_features_excluded": ["Year", "Year_centered", "Year_centered_sq"] if args.no_year else [],
-        "horizons": HORIZONS,
-        "history_windows": HISTORY_WINDOWS,
-        "tracks": {
+    if args.logistic_only:
+        variant_label = (
+            "logistic_only_no_year" if args.no_year else "logistic_only_with_year"
+        )
+        tracks_block = {
+            "screening": {
+                "purpose": (
+                    "Logistic-only alternative screening track for frontend "
+                    "post-processing. Single-family, dependency-light uniform "
+                    "model selection across all horizons."
+                ),
+                "family_per_horizon": SCREENING_FAMILY,
+                "rationale": (
+                    "Frontend-driven choice. Trades ~0.020 PR-AUC at N=1 and "
+                    "N=3 against the mixed-family default in exchange for a "
+                    "uniform logistic output that is easier to post-process "
+                    "client-side."
+                ),
+            },
+        }
+    else:
+        variant_label = "no_year" if args.no_year else "with_year"
+        tracks_block = {
             "screening": {
                 "purpose": "Pure-prediction risk score for passive screening (thesis §5.1, §6.4).",
                 "family_per_horizon": SCREENING_FAMILY,
@@ -550,13 +608,20 @@ def main() -> None:
                 "purpose": "Monotonic intervention-safe risk score for what-if simulation (thesis §5.4, §6.4).",
                 "family_per_horizon": INTERVENTION_FAMILY,
             },
-        },
+        }
+
+    registry = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "variant": variant_label,
+        "year_features_excluded": ["Year", "Year_centered", "Year_centered_sq"] if args.no_year else [],
+        "horizons": HORIZONS,
+        "history_windows": HISTORY_WINDOWS,
+        "tracks": tracks_block,
         "models": registry_entries,
     }
     registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
 
-    label = "no_year" if args.no_year else "with_year"
-    print(f"\nExported {len(registry_entries)} models ({label}) → {MODEL_DIR}")
+    print(f"\nExported {len(registry_entries)} models ({variant_label}) → {MODEL_DIR}")
     print(f"Registry → {registry_path}")
 
 

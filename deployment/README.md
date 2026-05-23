@@ -10,7 +10,7 @@ so it builds and runs on its own.
 
 | File | Purpose |
 |------|---------|
-| `api.py` | FastAPI app: `/predict`, `/predict/interventions`, `/no_year/*` |
+| `api.py` | FastAPI app: `/predict`, `/predict/interventions`, `/no_year/*`, `/logistic_only/*` |
 | `schemas.py` | Pydantic request/response models (the wire contract) |
 | `export_models.py` | Trains and exports the 30 model artifacts |
 | `modeling.py` | Vendored feature engineering, preprocessing, monotone rules |
@@ -48,6 +48,29 @@ Optional construct-validity variant (powers the `/no_year/*` routes):
 python export_models.py --no-year
 ```
 
+Optional logistic-only screening variant (powers the `/logistic_only/*` routes):
+
+```bash
+python export_models.py --logistic-only              # with-Year
+python export_models.py --logistic-only --no-year    # no-Year
+```
+
+Each `--logistic-only` invocation writes 15 screening-only artifacts that use
+logistic regression at every horizon (intervention track is skipped). Outputs
+go to `models_logistic_only/` or `models_logistic_only_no_year/`.
+
+### Why logistic-only?
+
+The default `/predict` route returns a per-horizon winning family (CatBoost at
+N=1, XGBoost at N=3, Logistic at N=2/4/5), which means the response
+`model_family` field varies by horizon. The `/logistic_only/*` route tree was
+added for frontend consumers that want a uniform single-family output for
+easier client-side post-processing (e.g. coefficient-based explanations, linear
+score decomposition). It trades roughly **0.020 PR-AUC at N=1 and N=3** against
+the mixed-family default, and is within ~0.001 at N=2/4/5 (where the default
+already uses Logistic). See `digihealth_risk/phase_8/README.md` for the
+modeling validation.
+
 ## 2. Run the API
 
 ```bash
@@ -76,19 +99,31 @@ docker run -p 8000:8000 -v "$(pwd)/models:/app/models" digihealth-risk-api
 | GET | `/health` | Loaded-model status per track |
 | GET | `/models` | List loaded artifacts |
 | GET | `/models/{key}` | One artifact's metadata |
-| POST | `/predict` | Passive-screening risk score |
+| POST | `/predict` | Passive-screening risk score (mixed family per horizon) |
 | POST | `/predict/interventions` | Intervention-safe what-if simulation |
 | GET / POST | `/no_year/*` | The same route tree with Year features excluded |
+| POST | `/logistic_only/predict` | Screening using logistic at every horizon (uniform single-family output) |
+| POST | `/logistic_only/no_year/predict` | Logistic-only screening, Year features excluded |
+| GET | `/logistic_only/health`, `/logistic_only/models`, `/logistic_only/models/{key}` | Logistic-only registry surface |
+| GET | `/logistic_only/no_year/health`, `/logistic_only/no_year/models`, `/logistic_only/no_year/models/{key}` | Logistic-only no-Year registry surface |
 
 The `/no_year/*` routes return 404 until `export_models.py --no-year` has been
-run; `/predict` and `/predict/interventions` work regardless.
+run; the `/logistic_only/*` and `/logistic_only/no_year/*` routes return 404
+until `export_models.py --logistic-only` and `--logistic-only --no-year` have
+been run respectively. `/predict` and `/predict/interventions` work regardless.
+
+Intervention scoring is **not** exposed under `/logistic_only/*`; use
+`/predict/interventions` (or `/no_year/predict/interventions`) for what-if
+simulation.
 
 ## Environment variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `DIGIHEALTH_MODEL_DIR` | `./models` | With-Year artifacts the API loads |
-| `DIGIHEALTH_MODEL_DIR_NO_YEAR` | `./models_no_year` | No-Year artifacts |
+| `DIGIHEALTH_MODEL_DIR` | `./models` | With-Year mixed-family artifacts |
+| `DIGIHEALTH_MODEL_DIR_NO_YEAR` | `./models_no_year` | No-Year mixed-family artifacts |
+| `DIGIHEALTH_MODEL_DIR_LOGISTIC_ONLY` | `./models_logistic_only` | With-Year logistic-only artifacts |
+| `DIGIHEALTH_MODEL_DIR_LOGISTIC_ONLY_NO_YEAR` | `./models_logistic_only_no_year` | No-Year logistic-only artifacts |
 | `DIGIHEALTH_PHASE0_DIR` | `../digihealth_risk/phase_0/outputs` | Modeling tables for export |
 | `DIGIHEALTH_DATA` | `../datasets/df_final.pkl` | Source cohort for the split |
 | `DIGIHEALTH_SPLIT_CACHE` | `../digihealth_risk/phase_0/outputs/patient_split.csv` | Canonical split cache |
